@@ -1,0 +1,76 @@
+plugins {
+	id 'java'
+}
+
+repositories {
+	mavenLocal()
+	maven {
+		url = 'https://repo.runelite.net'
+		content {
+			includeGroupByRegex("net\\.runelite.*")
+		}
+	}
+	mavenCentral()
+}
+
+def runeLiteVersion = 'latest.release'
+def pluginMainClass = 'com.guidehub.sync.GuideHubSyncPluginTest'
+
+dependencies {
+	compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
+
+	compileOnly 'org.projectlombok:lombok:1.18.30'
+	annotationProcessor 'org.projectlombok:lombok:1.18.30'
+
+	testImplementation 'junit:junit:4.12'
+	testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
+	testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
+}
+
+group = 'com.guidehub'
+version = '1.0-SNAPSHOT'
+
+tasks.withType(JavaCompile).configureEach {
+	options.encoding = 'UTF-8'
+	options.release.set(11)
+}
+
+tasks.register('run', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = pluginMainClass
+
+	jvmArgs "-ea"
+	args "--developer-mode", "--debug"
+}
+
+// Builds a self-contained development client (RuneLite + this plugin) in build/devclient that can be copied to
+// another PC and started with run.bat / run.sh. Needed because the official launcher ignores sideloaded plugins.
+tasks.register('devBundle', Copy) {
+	dependsOn 'jar', 'testClasses'
+	from(configurations.testRuntimeClasspath) { into 'lib' }
+	from(tasks.named('jar')) { into 'lib' }
+	from(sourceSets.test.output) { into 'classes' }
+	into layout.buildDirectory.dir('devclient')
+	doLast {
+		def dir = layout.buildDirectory.dir('devclient').get().asFile
+		new File(dir, 'run.bat').text = '''@echo off
+rem Guide Hub Sync development client. Uses RuneLite's bundled Java if present, else "java" on PATH.
+set "JAVA=%LOCALAPPDATA%\\RuneLite\\jre\\bin\\java.exe"
+if not exist "%JAVA%" set "JAVA=java"
+cd /d "%~dp0"
+"%JAVA%" -ea -Xmx768m -cp "classes;lib\\*" com.guidehub.sync.GuideHubSyncPluginTest --developer-mode
+pause
+'''
+		new File(dir, 'run.sh').text = '''#!/bin/sh
+cd "$(dirname "$0")"
+exec java -ea -Xmx768m -cp "classes:lib/*" com.guidehub.sync.GuideHubSyncPluginTest --developer-mode
+'''
+		new File(dir, 'README.txt').text = '''Guide Hub Sync - development client
+1. Copy this whole folder to the gaming PC.
+2. Jagex account? Make the normal RuneLite save your login once: in the RuneLite launcher's Configure dialog set
+   Client arguments to  --insecure-write-credentials  , start RuneLite through the Jagex launcher, log in, close it,
+   then remove that argument again. (This writes %USERPROFILE%\\.runelite\\credentials.properties; delete it when done.)
+3. Double-click run.bat. A RuneLite window opens with the Guide Hub Sync plugin available in the wrench menu.
+'''
+	}
+}
